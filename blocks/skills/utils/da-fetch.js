@@ -78,7 +78,36 @@ export async function waitForImsToken(timeoutMs = 4000) {
   return null;
 }
 
+// Seam for tests: the host page's own api module can't be imported from the test runner.
+export const testHooks = {
+  loadHostApi: () => import(`${window.location.origin}/nx2/utils/api.js`),
+};
+
+// With an alternate idp (Okta) there is no window.adobeIMS; the host DA page's daFetch already
+// carries that session's token and the per-site exchange da-admin requires.
+async function hostApiForAltSession() {
+  try {
+    const api = await testHooks.loadHostApi();
+    if (!api.useAlt) return null;
+    const { accessToken } = await api.loadIms();
+    return accessToken ? api : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function daFetch(url, opts = {}) {
+  if (!getToken() && shouldAttachToken(url)) {
+    const api = await hostApiForAltSession();
+    if (api) {
+      try {
+        return await api.daFetch({ url, opts: { ...opts } });
+      } catch (err) {
+        return new Response(null, { status: 500, statusText: String(err?.message || err) });
+      }
+    }
+  }
+
   const nextOpts = {
     ...opts,
     headers: { ...(opts.headers || {}) },
